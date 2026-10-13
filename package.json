@@ -9,12 +9,16 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@vercel/blob": "^2.8.1",
+    "jszip": "^3.10.2",
     "next": "16.4.0",
+    "qrcode": "^1.5.4",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
