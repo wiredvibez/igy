@@ -42,3 +42,8 @@ next-env.d.ts
 
 # local board storage
 .data/
+
+# agent skills installed by the Upstash integration
+/.agents/
+/.claude/skills/
+/skills-lock.json
