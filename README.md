@@ -1,8 +1,8 @@
 # Collage
 
-A presenter screen shows a QR code. Phones scan it and upload photos, and the board re-tiles itself edge to edge on a white background: the QR fills the screen alone, splits 50:50 with the first photo, then thirds, and so on. Every new photo reflows the grid so all cells stay as large as possible. The board holds up to 100 photos, each up to 10 MB.
+A presenter screen shows a QR code. Phones scan it and upload photos, and the board re-tiles itself edge to edge on a white background in justified rows: each photo's cell follows its own shape, so portraits stay tall and landscapes wide, and rows are sized so the screen is filled with as little cropping as possible. The QR is one item near the middle: alone it fills the screen, then shares it with the first photos. The board holds up to 100 photos, each up to 10 MB.
 
-An admin can set a center image (it takes the QR's cell), switch between one photo per phone and many, download the board, or reset it. The phone page is Hebrew, RTL, and styled after igy.org.il.
+An admin can set a center image, which replaces the QR. From two photos up it sits dead center, framed by the photos; from about eight photos it is about four times the average photo (two rows tall) and normally cropped at most 1.8× from its own shape. With only two or three photos, keeping it centered on a widescreen squeezes those photos into tall strips until more arrive. They can also switch between one photo per phone and many, download the board, or reset it. The phone page is Hebrew, RTL, and styled after igy.org.il.
 
 ```bash
 npm install
@@ -19,4 +19,4 @@ Open the presenter at `/` and the phone page at `/join`. The admin password is `
 
 Don't keep board state in a Blob JSON file. Blob reads are eventually consistent, so an ETag compare-and-set on one file starts failing after a few writes. That was the "upload failed after ~6 photos" bug.
 
-`npx tsx scripts/check-layout.ts` checks the grid layout.
+`npx tsx scripts/check-layout.ts` checks the layout: full coverage, no overlaps, a centered center image, and photo orientation.

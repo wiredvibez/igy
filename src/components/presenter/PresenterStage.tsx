@@ -129,13 +129,15 @@ export function PresenterStage() {
           rect={
             liftedId === hero.id && activeOpenId === hero.id
               ? expandedRect(size.width, size.height, photoAspect(hero))
-              : containRect(layout.center, photoAspect(hero))
+              : layout.center.fit === "contain"
+                ? containRect(layout.center, photoAspect(hero))
+                : layout.center
           }
           src={`/api/media/${hero.id}`}
           alt="תמונה מרכזית"
           pressed={activeOpenId === hero.id}
           lifted={liftedId === hero.id}
-          fit="contain"
+          fit={liftedId === hero.id ? "contain" : layout.center.fit}
           onToggle={(event) => {
             event.stopPropagation();
             toggle(hero.id);
