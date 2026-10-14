@@ -9,7 +9,7 @@ const stages = [
   [1024, 768],
   [2560, 1440],
 ];
-const counts = [0, 1, 2, 5, 12, 40, 80];
+const counts = [0, 1, 2, 3, 5, 12, 40, 80, 99, 100];
 const heroes = [
   null,
   { id: "hero", width: 4000, height: 3000 },
@@ -30,9 +30,11 @@ for (const [stageWidth, stageHeight] of stages) {
       const layout = layoutBoard({ stageWidth, stageHeight, photos, hero });
       const label = `${stageWidth}x${stageHeight} n=${count} hero=${hero ? hero.width + "x" + hero.height : "qr"}`;
       if (layout.tiles.length !== count) fail(label, `placed ${layout.tiles.length}`);
-      if (hero && Math.abs(layout.center.width / layout.center.height - hero.width / hero.height) > 0.04) {
-        fail(label, "hero aspect drifted");
-      }
+      const area = [layout.center, ...layout.tiles.map((tile) => tile.rect)].reduce(
+        (sum, rect) => sum + rect.width * rect.height,
+        0,
+      );
+      if (area !== stageWidth * stageHeight) fail(label, `covers ${area} of ${stageWidth * stageHeight}`);
       for (const tile of layout.tiles) {
         if (!inside(tile.rect, stageWidth, stageHeight)) fail(label, "tile outside");
         if (overlaps(tile.rect, layout.center)) fail(label, "tile hits center");
@@ -45,6 +47,19 @@ for (const [stageWidth, stageHeight] of stages) {
     }
   }
 }
+
+// The first photos split the stage evenly: 50:50, then thirds.
+const two = layoutBoard({ stageWidth: 1920, stageHeight: 1080, photos: [{ id: "a", width: 1, height: 1 }], hero: null });
+if (two.center.width !== 960 || two.tiles[0].rect.width !== 960 || two.tiles[0].rect.height !== 1080) fail("two", "not 50:50");
+const three = layoutBoard({
+  stageWidth: 1920,
+  stageHeight: 1080,
+  photos: [{ id: "a", width: 1, height: 1 }, { id: "b", width: 1, height: 1 }],
+  hero: null,
+});
+if (three.center.width !== 640 || three.center.left !== 640) fail("three", "not thirds with the QR in the middle");
+const one = layoutBoard({ stageWidth: 1920, stageHeight: 1080, photos: [], hero: null });
+if (one.center.width !== 1920 || one.center.height !== 1080) fail("one", "QR is not full page");
 
 const wide = expandedRect(1920, 1080, 16 / 9);
 if (wide.width > 1920 * 0.921 || wide.height > 1080 * 0.921) fail("expand", "overflows");

@@ -2,21 +2,31 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 const COOKIE = "collage_admin";
 
-function password(): string {
-  return process.env.ADMIN_PASSWORD || "admin";
+// The "admin" default is for local dev only. A deployment without ADMIN_PASSWORD has no admin,
+// so nobody at the event can reset the board by guessing the default.
+function password(): string | null {
+  if (process.env.ADMIN_PASSWORD) return process.env.ADMIN_PASSWORD;
+  return process.env.VERCEL ? null : "admin";
+}
+
+export function adminConfigured(): boolean {
+  return password() !== null;
 }
 
 export function passwordMatches(input: string): boolean {
-  return digestEqual(input, password());
+  const expected = password();
+  return expected !== null && digestEqual(input, expected);
 }
 
-export function adminToken(): string {
-  return createHmac("sha256", password()).update("collage-admin-v1").digest("hex");
+export function adminToken(): string | null {
+  const expected = password();
+  return expected === null ? null : createHmac("sha256", expected).update("collage-admin-v1").digest("hex");
 }
 
 export function tokenMatches(token: string | undefined): boolean {
-  if (!token) return false;
-  return digestEqual(token, adminToken());
+  const expected = adminToken();
+  if (!token || !expected) return false;
+  return digestEqual(token, expected);
 }
 
 export function isAdminRequest(request: Request): boolean {

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dev-local",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["BLOB_READ_WRITE_TOKEN=", "KV_REST_API_URL=", "KV_REST_API_TOKEN=", "UPSTASH_REDIS_REST_URL=", "UPSTASH_REDIS_REST_TOKEN=", "npm", "run", "dev", "--", "-p", "3123"],
+      "port": 3123
+    }
+  ]
+}

@@ -1,18 +1,25 @@
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import {
-  BlobNotFoundError,
-  BlobPreconditionFailedError,
-  get,
-  head,
-  put,
-  del,
-} from "@vercel/blob";
+import { BlobNotFoundError, del, get, put } from "@vercel/blob";
+import { Redis } from "@upstash/redis";
 import { isId } from "@/lib/constants";
 import type { ImageKind, SessionState, ViewportState } from "@/lib/types";
 
-const SESSION_PATH = "collage/session.json";
-const VIEWPORT_PATH = "collage/viewport.json";
+// Board state lives in Redis, which is strongly consistent, so concurrent uploads can
+// safely compare-and-set one key. Vercel Blob only holds the write-once image bytes:
+// its reads are eventually consistent, which made a Blob-hosted session file fail
+// its ETag check after a handful of uploads.
+const SESSION_KEY = "collage:session";
+const VIEWPORT_KEY = "collage:viewport";
+const VIEWPORT_TTL_SECONDS = 300;
+
+const COMPARE_AND_SET = `
+local current = redis.call('GET', KEYS[1])
+if current == false then current = '' end
+if current ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[1], ARGV[2])
+return 1
+`;
 
 const EMPTY_SESSION: SessionState = {
   version: 0,
@@ -22,32 +29,39 @@ const EMPTY_SESSION: SessionState = {
   photos: [],
 };
 
+let redisClient: Redis | null = null;
+
 export function storageConfigured(): boolean {
-  return !process.env.VERCEL || Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+  return !process.env.VERCEL || remoteStorage();
 }
 
 export async function readSession(): Promise<SessionState> {
-  if (usesBlob()) {
-    const loaded = await readBlobJson<SessionState>(SESSION_PATH);
-    return loaded ? normalizeSession(loaded.data) : { ...EMPTY_SESSION };
+  if (usesRedis()) {
+    const raw = await redis().get<string>(SESSION_KEY);
+    return parseSession(raw);
   }
   return readLocalSession();
+}
+
+export async function readBoard(): Promise<{ session: SessionState; viewport: ViewportState | null }> {
+  if (usesRedis()) {
+    const [session, viewport] = await redis().mget<[string | null, string | null]>(SESSION_KEY, VIEWPORT_KEY);
+    return { session: parseSession(session), viewport: parseViewport(viewport) };
+  }
+  const [session, viewport] = await Promise.all([readLocalSession(), readViewport()]);
+  return { session, viewport };
 }
 
 export async function updateSession(
   mutator: (current: SessionState) => SessionState,
 ): Promise<SessionState> {
-  return usesBlob() ? updateBlob(mutator) : updateLocal(mutator);
+  return usesRedis() ? updateRedis(mutator) : updateLocal(mutator);
 }
 
 export async function readViewport(): Promise<ViewportState | null> {
-  if (usesBlob()) {
-    const loaded = await readBlobJson<ViewportState>(VIEWPORT_PATH);
-    return loaded ? normalizeViewport(loaded.data) : null;
-  }
+  if (usesRedis()) return parseViewport(await redis().get<string>(VIEWPORT_KEY));
   try {
-    const raw = await readFile(viewportFile(), "utf8");
-    return normalizeViewport(JSON.parse(raw) as ViewportState);
+    return parseViewport(await readFile(viewportFile(), "utf8"));
   } catch {
     return null;
   }
@@ -55,14 +69,8 @@ export async function readViewport(): Promise<ViewportState | null> {
 
 export async function writeViewport(viewport: ViewportState): Promise<void> {
   const body = JSON.stringify(viewport);
-  if (usesBlob()) {
-    await put(VIEWPORT_PATH, body, {
-      access: "private",
-      allowOverwrite: true,
-      addRandomSuffix: false,
-      contentType: "application/json",
-      cacheControlMaxAge: 60,
-    });
+  if (usesRedis()) {
+    await redis().set(VIEWPORT_KEY, body, { ex: VIEWPORT_TTL_SECONDS });
     return;
   }
   await mkdir(dataRoot(), { recursive: true });
@@ -77,7 +85,7 @@ export async function saveImage(id: string, bytes: Buffer, contentType: ImageKin
       allowOverwrite: true,
       addRandomSuffix: false,
       contentType,
-      cacheControlMaxAge: 60,
+      cacheControlMaxAge: 31_536_000,
     });
     return;
   }
@@ -89,7 +97,7 @@ export async function readImage(id: string): Promise<Buffer | null> {
   if (!isId(id)) return null;
   if (usesBlob()) {
     try {
-      const result = await get(imagePath(id), { access: "private", useCache: false });
+      const result = await get(imagePath(id), { access: "private" });
       if (!result || result.statusCode !== 200 || !result.stream) return null;
       return Buffer.from(await new Response(result.stream).arrayBuffer());
     } catch (error) {
@@ -108,7 +116,6 @@ export async function deleteImage(id: string): Promise<void> {
   if (!isId(id)) return;
   if (usesBlob()) {
     try {
-      await head(imagePath(id));
       await del(imagePath(id));
     } catch (error) {
       if (error instanceof BlobNotFoundError) return;
@@ -119,8 +126,50 @@ export async function deleteImage(id: string): Promise<void> {
   await rm(localImage(id), { force: true });
 }
 
+// Blob and Redis are used together or not at all, so a dev machine with only a Blob token
+// keeps everything in .data/ instead of writing test photos into the production store.
+function remoteStorage(): boolean {
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN) && redisEnv() !== null;
+}
+
 function usesBlob(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+  return remoteStorage();
+}
+
+function redisEnv(): { url: string; token: string } | null {
+  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+  return url && token ? { url, token } : null;
+}
+
+function usesRedis(): boolean {
+  return remoteStorage();
+}
+
+function redis(): Redis {
+  if (redisClient) return redisClient;
+  const env = redisEnv();
+  if (!env) throw new Error("Redis is not configured.");
+  // Values are stored and compared as raw JSON strings, so skip the client's own parsing.
+  redisClient = new Redis({ ...env, automaticDeserialization: false });
+  return redisClient;
+}
+
+async function updateRedis(mutator: (current: SessionState) => SessionState): Promise<SessionState> {
+  const client = redis();
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const raw = await client.get<string>(SESSION_KEY);
+    const current = parseSession(raw);
+    const next = { ...mutator(structuredClone(current)), version: current.version + 1 };
+    const saved = await client.eval<[string, string], number>(
+      COMPARE_AND_SET,
+      [SESSION_KEY],
+      [raw ?? "", JSON.stringify(next)],
+    );
+    if (Number(saved) === 1) return next;
+    await delay(Math.random() * Math.min(250, 20 + attempt * 15));
+  }
+  throw new Error("Could not save the session.");
 }
 
 async function updateLocal(mutator: (current: SessionState) => SessionState): Promise<SessionState> {
@@ -132,60 +181,27 @@ async function updateLocal(mutator: (current: SessionState) => SessionState): Pr
   });
 }
 
-async function updateBlob(mutator: (current: SessionState) => SessionState): Promise<SessionState> {
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const existing = await readBlobJson<SessionState>(SESSION_PATH);
-    const current = existing ? normalizeSession(existing.data) : { ...EMPTY_SESSION };
-    const next = { ...mutator(structuredClone(current)), version: current.version + 1 };
-    const body = JSON.stringify(next);
-    try {
-      if (!existing) {
-        await put(SESSION_PATH, body, {
-          access: "private",
-          allowOverwrite: false,
-          addRandomSuffix: false,
-          contentType: "application/json",
-          cacheControlMaxAge: 60,
-        });
-        return next;
-      }
-      await put(SESSION_PATH, body, {
-        access: "private",
-        allowOverwrite: true,
-        addRandomSuffix: false,
-        contentType: "application/json",
-        cacheControlMaxAge: 60,
-        ifMatch: existing.etag,
-      });
-      return next;
-    } catch (error) {
-      if (error instanceof BlobPreconditionFailedError) continue;
-      if (!existing) {
-        const raced = await readBlobJson<SessionState>(SESSION_PATH);
-        if (raced) continue;
-      }
-      throw error;
-    }
+function parseSession(raw: string | null): SessionState {
+  if (!raw) return { ...EMPTY_SESSION };
+  try {
+    return normalizeSession(JSON.parse(raw) as SessionState);
+  } catch {
+    return { ...EMPTY_SESSION };
   }
-  throw new Error("Could not save the session.");
 }
 
-async function readBlobJson<T>(pathname: string): Promise<{ data: T; etag: string } | null> {
+function parseViewport(raw: string | null): ViewportState | null {
+  if (!raw) return null;
   try {
-    const result = await get(pathname, { access: "private", useCache: false });
-    if (!result || result.statusCode !== 200 || !result.stream) return null;
-    const text = await new Response(result.stream).text();
-    return { data: JSON.parse(text) as T, etag: result.blob.etag };
-  } catch (error) {
-    if (error instanceof BlobNotFoundError) return null;
-    throw error;
+    return normalizeViewport(JSON.parse(raw) as ViewportState);
+  } catch {
+    return null;
   }
 }
 
 async function readLocalSession(): Promise<SessionState> {
   try {
-    const raw = await readFile(sessionFile(), "utf8");
-    return normalizeSession(JSON.parse(raw) as SessionState);
+    return parseSession(await readFile(sessionFile(), "utf8"));
   } catch {
     return { ...EMPTY_SESSION };
   }

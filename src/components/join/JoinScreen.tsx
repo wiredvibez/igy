@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { AdminSheet } from "@/components/join/AdminSheet";
 import { PasswordDialog } from "@/components/join/PasswordDialog";
+import { MAX_BATCH, MAX_PHOTOS } from "@/lib/constants";
 import { prepareImage } from "@/lib/prepare-image";
 import { errorMessage, readPayload, useDeviceId, useOrigin, useSession } from "@/lib/use-session";
 
@@ -17,8 +18,7 @@ type PendingPhoto = {
 
 export function JoinScreen() {
   const deviceId = useDeviceId();
-  const { session, setSession } = useSession(deviceId, 3000);
-  const cameraRef = useRef<HTMLInputElement>(null);
+  const { session, unavailable, setSession } = useSession(deviceId, 5000, { pauseWhenHidden: true });
   const libraryRef = useRef<HTMLInputElement>(null);
   const origin = useOrigin();
   const [admin, setAdmin] = useState(false);
@@ -26,10 +26,12 @@ export function JoinScreen() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [pending, setPending] = useState<PendingPhoto[]>([]);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [preparing, setPreparing] = useState(false);
+  const [sent, setSent] = useState(0);
 
   const pendingRef = useRef(pending);
+  const busy = progress !== null;
 
   useEffect(() => {
     pendingRef.current = pending;
@@ -48,33 +50,51 @@ export function JoinScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!sent) return;
+    const timer = window.setTimeout(() => setSent(0), 3200);
+    return () => window.clearTimeout(timer);
+  }, [sent]);
+
   const single = session?.mode === "single";
   const ownId = session?.ownPhotoIds[0];
+  const onBoard = session?.photos.length ?? 0;
+  const full = session ? onBoard >= MAX_PHOTOS && !(single && ownId) : unavailable;
+
+  function pick() {
+    setError("");
+    libraryRef.current?.click();
+  }
 
   async function onFiles(event: ChangeEvent<HTMLInputElement>) {
     const files = [...(event.target.files ?? [])];
     event.target.value = "";
     if (!files.length) return;
-    const chosen = single ? files.slice(0, 1) : files.slice(0, 12);
-    if (!single && files.length > 12) setError("You can send up to 12 at a time.");
-    else setError("");
+    const room = single ? 1 : Math.max(0, MAX_BATCH - pendingRef.current.length);
+    const chosen = files.slice(0, room);
+    let notice = files.length > room ? `אפשר לשלוח עד ${MAX_BATCH} תמונות בכל פעם.` : "";
+    setError(notice);
     setPreparing(true);
     try {
       const prepared: PendingPhoto[] = [];
       for (const file of chosen) {
-        const image = await prepareImage(file);
-        prepared.push({ id: crypto.randomUUID(), blob: image.blob, previewUrl: URL.createObjectURL(image.blob) });
-      }
-      setPending((current) => {
-        const next = single ? prepared : [...current, ...prepared].slice(-12);
-        const kept = new Set(next.map((photo) => photo.previewUrl));
-        for (const photo of current) {
-          if (!kept.has(photo.previewUrl)) URL.revokeObjectURL(photo.previewUrl);
+        try {
+          const image = await prepareImage(file);
+          prepared.push({ id: crypto.randomUUID(), blob: image.blob, previewUrl: URL.createObjectURL(image.blob) });
+        } catch (caught) {
+          notice = caught instanceof Error ? caught.message : "לא הצלחנו לקרוא את התמונה הזאת.";
         }
-        return next;
-      });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "This photo’s format could not be converted.");
+      }
+      setError(notice);
+      if (prepared.length === 0) return;
+      const current = pendingRef.current;
+      const next = single ? prepared.slice(0, 1) : [...current, ...prepared].slice(0, MAX_BATCH);
+      const kept = new Set(next.map((photo) => photo.previewUrl));
+      for (const photo of [...current, ...prepared]) {
+        if (!kept.has(photo.previewUrl)) URL.revokeObjectURL(photo.previewUrl);
+      }
+      pendingRef.current = next;
+      setPending(next);
     } finally {
       setPreparing(false);
     }
@@ -90,10 +110,12 @@ export function JoinScreen() {
 
   async function upload() {
     if (!session || !deviceId || pending.length === 0) return;
-    setBusy(true);
+    const queue = [...pending];
     setError("");
+    setProgress({ done: 0, total: queue.length });
     let epoch = session.epoch;
-    for (const item of [...pending]) {
+    let uploaded = 0;
+    for (const item of queue) {
       const body = new FormData();
       body.set("id", item.id);
       body.set("deviceId", deviceId);
@@ -103,93 +125,120 @@ export function JoinScreen() {
         const response = await fetch("/api/upload", { method: "POST", body });
         const payload = await readPayload(response);
         if (!response.ok || !payload.session) {
-          setError(errorMessage(payload, "The upload failed. This photo is still here."));
-          setBusy(false);
-          return;
+          setError(errorMessage(payload, "ההעלאה נכשלה. התמונות שלא עלו עדיין כאן – נסו שוב."));
+          break;
         }
         epoch = payload.session.epoch;
         setSession(payload.session);
         removePending(item.id);
+        uploaded += 1;
+        setProgress({ done: uploaded, total: queue.length });
       } catch {
-        setError("The upload failed. This photo is still here.");
-        setBusy(false);
-        return;
+        setError("אין חיבור. התמונות שלא עלו עדיין כאן – נסו שוב.");
+        break;
       }
     }
-    setBusy(false);
+    setProgress(null);
+    if (uploaded > 0) setSent(uploaded);
   }
+
+  const title = "תעלו למסך! 📸";
+  const sendLabel = progress
+    ? `שולחים ${Math.min(progress.done + 1, progress.total)}/${progress.total}…`
+    : pending.length > 1
+      ? `שלחו ${pending.length} תמונות למסך`
+      : "שלחו למסך";
 
   return (
     <main className="phone">
-      <p className="eyebrow">Collage</p>
-      <h1>{!session ? "Add a photo" : single ? "Add your photo" : "Add your photos"}</h1>
+      <header className="phone-top">
+        <span className="count-chip" aria-live="polite">
+          {session ? `${onBoard}/${MAX_PHOTOS} על המסך` : unavailable ? "הלוח לא זמין" : "מתחברים…"}
+        </span>
+        <button
+          type="button"
+          className="gear"
+          aria-label="ניהול"
+          onClick={() => (admin ? setAdminOpen(true) : setPasswordOpen(true))}
+        >
+          <GearIcon />
+        </button>
+      </header>
+
+      <h1 className="sticker">{title}</h1>
       <p className="lede">
-        {!session
-          ? "Choose a photo, then upload it to the screen."
-          : single
-            ? "Choose one, then upload it to the screen. Taking another replaces yours."
-            : "Choose what you want, then upload. Each one lands on the screen as it goes."}
+        {single
+          ? "בחרו תמונה אחת ושלחו. תמונה חדשה תחליף את הקודמת שלכם."
+          : "בחרו תמונות, שלחו – והן קופצות ישר לקולאז׳ הגדול."}
       </p>
-      {single && ownId && (
-        <img className="own-photo" src={`/api/media/${ownId}`} alt="Your photo currently on the screen" />
-      )}
-      {pending.length > 0 && (
-        <ul className="previews">
-          {pending.map((photo) => (
-            <li key={photo.id}>
-              <img src={photo.previewUrl} alt="" />
-              <button type="button" onClick={() => removePending(photo.id)} aria-label="Remove photo" disabled={busy}>
-                ×
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="row">
-        <button type="button" className="button solid" disabled={busy || preparing} onClick={() => cameraRef.current?.click()}>
-          {preparing ? "Preparing" : "Camera"}
-        </button>
-        <button type="button" className="button ghost" disabled={busy || preparing} onClick={() => libraryRef.current?.click()}>
-          Library
-        </button>
-      </div>
-      <button
-        type="button"
-        className="button upload"
-        disabled={busy || preparing || pending.length === 0 || !session || !deviceId}
-        onClick={() => void upload()}
-      >
-        {busy ? "Uploading" : pending.length > 1 ? `Upload ${pending.length}` : "Upload"}
-      </button>
+
+      <section className="pick-area">
+        {pending.length === 0 ? (
+          single && ownId ? (
+            <button type="button" className="pick own" onClick={pick} disabled={busy || preparing || full}>
+              <img src={`/api/media/${ownId}`} alt="התמונה שלך שכרגע על המסך" />
+              <span className="pick-label">{preparing ? "מכינים…" : "להחליף תמונה"}</span>
+            </button>
+          ) : (
+            <button type="button" className="pick" onClick={pick} disabled={busy || preparing || full}>
+              <span className="pick-icon" aria-hidden="true">
+                <PhotoIcon />
+              </span>
+              <span className="pick-label">
+                {!session && unavailable ? "הלוח לא זמין" : full ? "הלוח מלא" : preparing ? "מכינים…" : single ? "בחרו תמונה" : "בחרו תמונות"}
+              </span>
+              <span className="pick-hint">{!session && unavailable ? "נסו שוב עוד רגע" : full ? "אין מקום לעוד תמונות" : "מהגלריה או מהמצלמה"}</span>
+            </button>
+          )
+        ) : (
+          <ul className={pending.length <= 4 ? "previews roomy" : "previews"}>
+            {pending.map((photo) => (
+              <li key={photo.id}>
+                <img src={photo.previewUrl} alt="" />
+                <button type="button" onClick={() => removePending(photo.id)} aria-label="הסרת תמונה" disabled={busy}>
+                  ×
+                </button>
+              </li>
+            ))}
+            {!single && pending.length < MAX_BATCH && (
+              <li>
+                <button type="button" className="add-more" onClick={pick} disabled={busy || preparing} aria-label="להוסיף עוד תמונות">
+                  {preparing ? "…" : "+"}
+                </button>
+              </li>
+            )}
+            {single && (
+              <li>
+                <button type="button" className="add-more swap" onClick={pick} disabled={busy || preparing}>
+                  {preparing ? "…" : "החלפה"}
+                </button>
+              </li>
+            )}
+          </ul>
+        )}
+      </section>
+
       {error && (
         <p className="form-error" role="alert">
           {error}
         </p>
       )}
-      <input
-        ref={cameraRef}
-        hidden
-        type="file"
-        accept="image/*"
-        capture="environment"
-        onChange={onFiles}
-      />
-      <input
-        ref={libraryRef}
-        hidden
-        type="file"
-        accept="image/*"
-        multiple={!single}
-        onChange={onFiles}
-      />
+      {sent > 0 && !error && (
+        <p className="sent" role="status">
+          {sent > 1 ? `${sent} תמונות עלו למסך! 🎉` : "עלה למסך! 🎉"}
+        </p>
+      )}
+
       <button
         type="button"
-        className="gear"
-        aria-label="Admin"
-        onClick={() => (admin ? setAdminOpen(true) : setPasswordOpen(true))}
+        className="send"
+        disabled={busy || preparing || pending.length === 0 || !session || !deviceId}
+        onClick={() => void upload()}
       >
-        <GearIcon />
+        {sendLabel}
       </button>
+
+      <input ref={libraryRef} hidden type="file" accept="image/*" multiple={!single} onChange={onFiles} />
       {passwordOpen && (
         <PasswordDialog
           onClose={() => setPasswordOpen(false)}
@@ -209,6 +258,17 @@ export function JoinScreen() {
         />
       )}
     </main>
+  );
+}
+
+function PhotoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M5 4h14a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Zm0 2a1 1 0 0 0-1 1v8.6l3.8-3.8a1.5 1.5 0 0 1 2.1 0l2.6 2.6 1.6-1.6a1.5 1.5 0 0 1 2.1 0L20 15.6V7a1 1 0 0 0-1-1H5Zm11.5 1.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"
+      />
+    </svg>
   );
 }
 

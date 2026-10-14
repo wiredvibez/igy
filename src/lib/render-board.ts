@@ -1,5 +1,5 @@
 import { BOARD_BG } from "@/lib/constants";
-import { coverSource, exportStage, layoutBoard } from "@/lib/layout";
+import { containRect, coverSource, exportStage, layoutBoard, photoAspect } from "@/lib/layout";
 import { QR_QUIET, qrDrawSize, qrGrid } from "@/lib/qr";
 import type { PublicSession, Rect } from "@/lib/types";
 
@@ -44,7 +44,7 @@ async function drawBoard(
   canvas.width = Math.max(1, Math.round(stageWidth * scale));
   canvas.height = Math.max(1, Math.round(stageHeight * scale));
   const context = canvas.getContext("2d");
-  if (!context) throw new Error("Could not build the image.");
+  if (!context) throw new Error("לא הצלחנו ליצור את התמונה.");
 
   context.fillStyle = BOARD_BG;
   context.fillRect(0, 0, canvas.width, canvas.height);
@@ -61,14 +61,14 @@ async function drawBoard(
 
     for (const tile of layout.tiles) {
       const bitmap = bitmaps.get(tile.id);
-      if (!bitmap) throw new Error("A photo is missing.");
-      drawCover(context, bitmap, scaleRect(tile.rect, scale), 14 * scale);
+      if (!bitmap) throw new Error("אחת התמונות חסרה.");
+      drawCover(context, bitmap, scaleRect(tile.rect, scale), 0);
     }
 
     if (layout.center.kind === "hero" && session.hero) {
       const bitmap = bitmaps.get(session.hero.id);
-      if (!bitmap) throw new Error("The center image is missing.");
-      drawImageInRect(context, bitmap, scaleRect(layout.center, scale), 18 * scale);
+      if (!bitmap) throw new Error("התמונה המרכזית חסרה.");
+      drawImageInRect(context, bitmap, scaleRect(containRect(layout.center, photoAspect(session.hero)), scale), 0);
     } else if (joinUrl) {
       drawQr(context, joinUrl, scaleRect(layout.center, scale));
     }
@@ -78,7 +78,7 @@ async function drawBoard(
 
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((value) => resolve(value), "image/png"));
   if (!blob) {
-    if (attempt >= 3) throw new Error("Could not build the image.");
+    if (attempt >= 3) throw new Error("לא הצלחנו ליצור את התמונה.");
     return drawBoard(session, joinUrl, stageWidth, stageHeight, scale * 0.75, attempt + 1);
   }
   return blob;
@@ -86,7 +86,7 @@ async function drawBoard(
 
 async function loadBitmap(url: string): Promise<ImageBitmap> {
   const response = await fetch(url, { cache: "force-cache" });
-  if (!response.ok) throw new Error("A photo is missing.");
+  if (!response.ok) throw new Error("אחת התמונות חסרה.");
   return createImageBitmap(await response.blob());
 }
 
@@ -114,14 +114,14 @@ function drawImageInRect(
 }
 
 function drawQr(context: CanvasRenderingContext2D, url: string, rect: Rect) {
-  clip(context, rect, 16, () => {
+  clip(context, rect, 0, () => {
     context.fillStyle = "#ffffff";
     context.fillRect(rect.left, rect.top, rect.width, rect.height);
     const grid = qrGrid(url);
-    const { moduleSize, pixelSize } = qrDrawSize(Math.min(rect.width, rect.height), grid.size);
+    const { moduleSize, pixelSize } = qrDrawSize(Math.min(rect.width, rect.height) * 0.94, grid.size);
     const originX = Math.round(rect.left + (rect.width - pixelSize) / 2);
     const originY = Math.round(rect.top + (rect.height - pixelSize) / 2);
-    context.fillStyle = "#1c1916";
+    context.fillStyle = "#000000";
     for (let row = 0; row < grid.size; row += 1) {
       for (let col = 0; col < grid.size; col += 1) {
         if (!grid.modules[row * grid.size + col]) continue;
@@ -166,7 +166,7 @@ function scaleRect(rect: Rect, scale: number): Rect {
 
 async function fetchAsset(id: string, stem: string): Promise<{ name: string; bytes: ArrayBuffer }> {
   const response = await fetch(`/api/media/${id}`, { cache: "force-cache" });
-  if (!response.ok) throw new Error("A photo is missing.");
+  if (!response.ok) throw new Error("אחת התמונות חסרה.");
   const extension = response.headers.get("content-type") === "image/png" ? "png" : "jpg";
   return { name: `${stem}.${extension}`, bytes: await response.arrayBuffer() };
 }

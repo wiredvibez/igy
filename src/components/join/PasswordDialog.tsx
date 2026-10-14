@@ -39,12 +39,12 @@ export function PasswordDialog({
       });
       const payload = await readPayload(response);
       if (!response.ok) {
-        setError(errorMessage(payload, "That password is not right."));
+        setError(errorMessage(payload, "הסיסמה לא נכונה."));
         return;
       }
       onSuccess();
     } catch {
-      setError("Could not reach the board.");
+      setError("אין חיבור ללוח.");
     } finally {
       setBusy(false);
     }
@@ -53,8 +53,8 @@ export function PasswordDialog({
   return (
     <div className="modal-back" onClick={onClose}>
       <form className="modal" onClick={(event) => event.stopPropagation()} onSubmit={submit}>
-        <h2>Admin</h2>
-        <label htmlFor="admin-password">Password</label>
+        <h2>ניהול</h2>
+        <label htmlFor="admin-password">סיסמה</label>
         <input
           id="admin-password"
           ref={inputRef}
@@ -66,10 +66,10 @@ export function PasswordDialog({
         {error && <p className="form-error">{error}</p>}
         <div className="modal-actions">
           <button type="button" className="button ghost" onClick={onClose}>
-            Cancel
+            ביטול
           </button>
           <button type="submit" className="button solid" disabled={busy || password.length === 0}>
-            {busy ? "Checking" : "Unlock"}
+            {busy ? "בודקים…" : "כניסה"}
           </button>
         </div>
       </form>

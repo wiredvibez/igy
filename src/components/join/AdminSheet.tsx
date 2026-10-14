@@ -4,6 +4,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { MAX_PHOTOS } from "@/lib/constants";
 import { exportStage } from "@/lib/layout";
 import { prepareImage } from "@/lib/prepare-image";
 import { errorMessage, readPayload } from "@/lib/use-session";
@@ -20,7 +21,6 @@ export function AdminSheet({
   onClose: () => void;
   onSession: (session: PublicSession) => void;
 }) {
-  const cameraRef = useRef<HTMLInputElement>(null);
   const libraryRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -45,12 +45,12 @@ export function AdminSheet({
       });
       const payload = await readPayload(response);
       if (!response.ok || !payload.session) {
-        setError(errorMessage(payload, "Could not change the setting."));
+        setError(errorMessage(payload, "לא הצלחנו לשנות את ההגדרה."));
         return;
       }
       onSession(payload.session);
     } catch {
-      setError("Could not reach the board.");
+      setError("אין חיבור ללוח.");
     } finally {
       setBusy(null);
     }
@@ -71,12 +71,12 @@ export function AdminSheet({
       const response = await fetch("/api/hero", { method: "POST", body });
       const payload = await readPayload(response);
       if (!response.ok || !payload.session) {
-        setError(errorMessage(payload, "Could not set the center image."));
+        setError(errorMessage(payload, "לא הצלחנו להגדיר את התמונה המרכזית."));
         return;
       }
       onSession(payload.session);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not set the center image.");
+      setError(caught instanceof Error && /[\u0590-\u05ff]/.test(caught.message) ? caught.message : "לא הצלחנו להגדיר את התמונה המרכזית.");
     } finally {
       setBusy(null);
     }
@@ -89,12 +89,12 @@ export function AdminSheet({
       const response = await fetch(`/api/hero?epoch=${session.epoch}`, { method: "DELETE" });
       const payload = await readPayload(response);
       if (!response.ok || !payload.session) {
-        setError(errorMessage(payload, "Could not remove the center image."));
+        setError(errorMessage(payload, "לא הצלחנו להסיר את התמונה המרכזית."));
         return;
       }
       onSession(payload.session);
     } catch {
-      setError("Could not reach the board.");
+      setError("אין חיבור ללוח.");
     } finally {
       setBusy(null);
     }
@@ -120,7 +120,7 @@ export function AdminSheet({
       link.download = name;
       link.click();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not build the download.");
+      setError(caught instanceof Error && /[\u0590-\u05ff]/.test(caught.message) ? caught.message : "לא הצלחנו להכין את ההורדה.");
     } finally {
       setBusy(null);
     }
@@ -137,13 +137,13 @@ export function AdminSheet({
       const response = await fetch("/api/reset", { method: "POST" });
       const payload = await readPayload(response);
       if (!response.ok || !payload.session) {
-        setError(errorMessage(payload, "Could not reset the board."));
+        setError(errorMessage(payload, "לא הצלחנו לאפס את הלוח."));
         return;
       }
       onSession(payload.session);
       setConfirmReset(false);
     } catch {
-      setError("Could not reach the board.");
+      setError("אין חיבור ללוח.");
     } finally {
       setBusy(null);
     }
@@ -152,19 +152,19 @@ export function AdminSheet({
   return (
     <section className="sheet">
       <header className="sheet-bar">
-        <h2>Admin</h2>
+        <h2>ניהול</h2>
         <button type="button" className="button ghost" onClick={onClose}>
-          Close
+          סגירה
         </button>
       </header>
-      <div className="mode-switch" role="group" aria-label="Photos per phone">
+      <div className="mode-switch" role="group" aria-label="תמונות לכל טלפון">
         <button
           type="button"
           className={session.mode === "single" ? "mode on" : "mode"}
           disabled={busy !== null}
           onClick={() => changeMode("single")}
         >
-          One each
+          אחת לכל אחד
         </button>
         <button
           type="button"
@@ -172,43 +172,39 @@ export function AdminSheet({
           disabled={busy !== null}
           onClick={() => changeMode("multiple")}
         >
-          Many
+          בלי הגבלה
         </button>
       </div>
       <p className="hint">
         {session.mode === "single"
-          ? "Each phone can have one photo. A new upload replaces it."
-          : "Each phone can add as many photos as it likes."}
+          ? "לכל טלפון תמונה אחת. העלאה חדשה מחליפה אותה."
+          : `כל טלפון יכול להעלות כמה תמונות שרוצה (עד ${MAX_PHOTOS} בלוח).`}
       </p>
 
       <div className="sheet-block">
-        <h3>Center image</h3>
+        <h3>תמונה מרכזית</h3>
         {session.hero ? (
-          <img className="hero-preview" src={`/api/media/${session.hero.id}`} alt="Current center" />
+          <img className="hero-preview" src={`/api/media/${session.hero.id}`} alt="התמונה המרכזית הנוכחית" />
         ) : (
-          <p className="hint">None yet. The QR stays in the center until one is set.</p>
+          <p className="hint">אין כרגע. קוד ה־QR נשאר במרכז עד שתוגדר תמונה.</p>
         )}
         <div className="row">
-          <button type="button" className="button solid" disabled={busy !== null} onClick={() => cameraRef.current?.click()}>
-            Take
-          </button>
-          <button type="button" className="button ghost" disabled={busy !== null} onClick={() => libraryRef.current?.click()}>
-            Library
+          <button type="button" className="button solid" disabled={busy !== null} onClick={() => libraryRef.current?.click()}>
+            {busy === "hero" ? "מעלים…" : session.hero ? "החלפת תמונה" : "בחירת תמונה"}
           </button>
           {session.hero && (
             <button type="button" className="button ghost" disabled={busy !== null} onClick={removeHero}>
-              Remove
+              הסרה
             </button>
           )}
         </div>
-        <input ref={cameraRef} hidden type="file" accept="image/*" capture="environment" onChange={onHero} />
         <input ref={libraryRef} hidden type="file" accept="image/*" onChange={onHero} />
       </div>
 
       {session.hero && joinUrl && (
         <div className="sheet-block">
-          <h3>Join link</h3>
-          <p className="hint">The QR is hidden while the center image is up. People can still open this link.</p>
+          <h3>קישור הצטרפות</h3>
+          <p className="hint">קוד ה־QR מוסתר כל עוד יש תמונה מרכזית. אפשר עדיין להיכנס דרך הקישור.</p>
           <a className="join-link" href={joinUrl}>
             {joinUrl}
           </a>
@@ -217,36 +213,36 @@ export function AdminSheet({
             className="button ghost"
             onClick={() => void navigator.clipboard.writeText(joinUrl)}
           >
-            Copy link
+            העתקת קישור
           </button>
         </div>
       )}
 
       <div className="sheet-block">
-        <h3>Download</h3>
+        <h3>הורדה</h3>
         <p className="hint">
           {stage.live
-            ? `This matches the presenter at ${stage.width}×${stage.height}.`
-            : "Presenter is not connected. The download will use 1920×1080."}
+            ? `בגודל של מסך ההצגה: \u2066${stage.width}×${stage.height}\u2069.`
+            : "מסך ההצגה לא מחובר. ההורדה תהיה בגודל \u20661920×1080\u2069."}
         </p>
         <div className="row">
           <button type="button" className="button solid" disabled={busy !== null} onClick={() => downloadFile("png")}>
-            {busy === "png" ? "Preparing" : "Image"}
+            {busy === "png" ? "מכינים…" : "תמונת הלוח"}
           </button>
           <button type="button" className="button ghost" disabled={busy !== null} onClick={() => downloadFile("zip")}>
-            {busy === "zip" ? "Preparing" : "All files"}
+            {busy === "zip" ? "מכינים…" : "כל הקבצים"}
           </button>
         </div>
         {download && (
           <a className="save-link" href={download.url} download={download.name}>
-            Save {download.name}
+            שמירת {download.name}
           </a>
         )}
       </div>
 
       <div className="sheet-block">
         <button type="button" className="button danger" disabled={busy !== null} onClick={reset}>
-          {busy === "reset" ? "Clearing" : confirmReset ? "Clear the board now" : "Reset board"}
+          {busy === "reset" ? "מנקים…" : confirmReset ? "בטוח? לנקות את הלוח עכשיו" : "איפוס הלוח"}
         </button>
       </div>
       {error && <p className="form-error">{error}</p>}

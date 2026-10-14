@@ -1,15 +1,24 @@
 import { MAX_BYTES, MAX_EDGE } from "@/lib/constants";
 
+export class PrepareError extends Error {
+  constructor(
+    public code: "large" | "type",
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export async function prepareImage(file: File): Promise<{ blob: Blob; width: number; height: number }> {
+  if (file.size > MAX_BYTES) {
+    throw new PrepareError("large", "התמונה גדולה מ־10MB.");
+  }
+
   let bitmap: ImageBitmap;
   try {
-    bitmap = await createImageBitmap(file, {
-      imageOrientation: "from-image",
-      resizeWidth: MAX_EDGE,
-      resizeQuality: "high",
-    });
+    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
   } catch {
-    throw new Error("This photo’s format could not be converted.");
+    throw new PrepareError("type", "לא הצלחנו לקרוא את התמונה הזאת.");
   }
 
   try {
@@ -20,9 +29,10 @@ export async function prepareImage(file: File): Promise<{ blob: Blob; width: num
     canvas.width = width;
     canvas.height = height;
     const context = canvas.getContext("2d");
-    if (!context) throw new Error("This photo’s format could not be converted.");
-    context.fillStyle = "#0e0d0b";
+    if (!context) throw new PrepareError("type", "לא הצלחנו לקרוא את התמונה הזאת.");
+    context.fillStyle = "#ffffff";
     context.fillRect(0, 0, width, height);
+    context.imageSmoothingQuality = "high";
     context.drawImage(bitmap, 0, 0, width, height);
     const blob = await encodeUnder(canvas, MAX_BYTES);
     return { blob, width: canvas.width, height: canvas.height };
@@ -33,7 +43,7 @@ export async function prepareImage(file: File): Promise<{ blob: Blob; width: num
 
 async function encodeUnder(source: HTMLCanvasElement, limit: number): Promise<Blob> {
   let canvas = source;
-  let quality = 0.92;
+  let quality = 0.9;
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const blob = await toJpeg(canvas, quality);
     if (blob.size <= limit) return blob;
@@ -51,14 +61,14 @@ async function encodeUnder(source: HTMLCanvasElement, limit: number): Promise<Bl
     quality = 0.86;
   }
   const last = await toJpeg(canvas, 0.62);
-  if (last.size > limit) throw new Error("That photo is too large after conversion.");
+  if (last.size > limit) throw new PrepareError("large", "התמונה גדולה מדי.");
   return last;
 }
 
 function toJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new Error("This photo’s format could not be converted."))),
+      (blob) => (blob ? resolve(blob) : reject(new PrepareError("type", "לא הצלחנו לקרוא את התמונה הזאת."))),
       "image/jpeg",
       quality,
     );

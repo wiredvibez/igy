@@ -3,16 +3,16 @@
 /* User photos are positioned and cropped by the collage layout, not by the image optimizer. */
 /* eslint-disable @next/next/no-img-element */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { BOARD_BG } from "@/lib/constants";
-import { expandedRect, layoutBoard, photoAspect } from "@/lib/layout";
+import { containRect, expandedRect, layoutBoard, photoAspect } from "@/lib/layout";
 import { QR_QUIET, qrDrawSize, qrGrid } from "@/lib/qr";
 import { useLocalHost, useOrigin, useSession } from "@/lib/use-session";
 import type { Rect } from "@/lib/types";
 
 export function PresenterStage() {
   const stageRef = useRef<HTMLDivElement>(null);
-  const { session } = useSession(null, 1000);
+  const { session, unavailable } = useSession(null, 1500);
   const origin = useOrigin();
   const localHost = useLocalHost();
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -43,7 +43,7 @@ export function PresenterStage() {
       });
     };
     send();
-    const timer = window.setInterval(send, 5000);
+    const timer = window.setInterval(send, 10_000);
     document.addEventListener("visibilitychange", send);
     return () => {
       window.clearInterval(timer);
@@ -97,7 +97,6 @@ export function PresenterStage() {
 
   return (
     <div ref={stageRef} className="stage" style={{ background: BOARD_BG }} onClick={close}>
-      {layout && <div className="glow" style={glowStyle(layout.center)} />}
       {layout?.tiles.map((tile) => {
         const photo = session?.photos.find((item) => item.id === tile.id);
         if (!photo) return null;
@@ -111,7 +110,7 @@ export function PresenterStage() {
                 : tile.rect
             }
             src={`/api/media/${photo.id}`}
-            alt="Guest photo"
+            alt="תמונה מהקהל"
             pressed={activeOpenId === photo.id}
             lifted={lifted}
             fit={lifted ? "contain" : "cover"}
@@ -130,10 +129,10 @@ export function PresenterStage() {
           rect={
             liftedId === hero.id && activeOpenId === hero.id
               ? expandedRect(size.width, size.height, photoAspect(hero))
-              : layout.center
+              : containRect(layout.center, photoAspect(hero))
           }
           src={`/api/media/${hero.id}`}
-          alt="Center photo"
+          alt="תמונה מרכזית"
           pressed={activeOpenId === hero.id}
           lifted={liftedId === hero.id}
           fit="contain"
@@ -148,10 +147,11 @@ export function PresenterStage() {
       )}
       {layout && !session?.hero && joinUrl && <QrCard rect={layout.center} url={joinUrl} />}
       {(activeOpenId || liftedId) && (
-        <button type="button" className="scrim" aria-label="Close photo" onClick={close} />
+        <button type="button" className="scrim" aria-label="סגירת התמונה" onClick={close} />
       )}
-      {localHost && !session?.hero && (
-        <p className="local-note">Open this page from your computer’s network address so phones can scan the code.</p>
+      {unavailable && <p className="local-note">האחסון של הלוח לא מוגדר (Redis / Blob).</p>}
+      {localHost && !unavailable && !session?.hero && (
+        <p className="local-note">פתחו את הדף מכתובת הרשת של המחשב כדי שטלפונים יוכלו לסרוק את הקוד.</p>
       )}
     </div>
   );
@@ -176,23 +176,10 @@ function FrameButton({
   onToggle: (event: MouseEvent<HTMLButtonElement>) => void;
   onRest: () => void;
 }) {
-  const [entered, setEntered] = useState(false);
-
-  useLayoutEffect(() => {
-    let inner = 0;
-    const outer = requestAnimationFrame(() => {
-      inner = requestAnimationFrame(() => setEntered(true));
-    });
-    return () => {
-      cancelAnimationFrame(outer);
-      cancelAnimationFrame(inner);
-    };
-  }, []);
-
   return (
     <button
       type="button"
-      className={entered ? "frame" : "frame is-entering"}
+      className="frame"
       style={{
         left: rect.left,
         top: rect.top,
@@ -214,7 +201,7 @@ function FrameButton({
 
 function QrCard({ rect, url }: { rect: Rect; url: string }) {
   const grid = useMemo(() => qrGrid(url), [url]);
-  const { moduleSize, pixelSize } = qrDrawSize(Math.min(rect.width, rect.height), grid.size);
+  const { moduleSize, pixelSize } = qrDrawSize(Math.min(rect.width, rect.height) * 0.94, grid.size);
   const path = grid.modules
     .map((on, index) => {
       if (!on) return "";
@@ -228,16 +215,9 @@ function QrCard({ rect, url }: { rect: Rect; url: string }) {
 
   return (
     <div className="qr-card" style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}>
-      <svg width={pixelSize} height={pixelSize} viewBox={`0 0 ${pixelSize} ${pixelSize}`} role="img" aria-label="QR code to add a photo">
-        <path d={path} fill="#1c1916" />
+      <svg width={pixelSize} height={pixelSize} viewBox={`0 0 ${pixelSize} ${pixelSize}`} role="img" aria-label="קוד QR להעלאת תמונה">
+        <path d={path} fill="#000000" />
       </svg>
     </div>
   );
-}
-
-function glowStyle(rect: Rect): { left: number; top: number } {
-  return {
-    left: rect.left + rect.width / 2,
-    top: rect.top + rect.height / 2,
-  };
 }
