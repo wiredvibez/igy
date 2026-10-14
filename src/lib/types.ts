@@ -40,6 +40,8 @@ export type PublicSession = {
   photos: PublicPhoto[];
   viewport: ViewportState | null;
   ownPhotoIds: string[];
+  // The running deployment, so an open presenter can reload when a new one ships.
+  build?: string;
 };
 
 export type Rect = {

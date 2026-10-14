@@ -10,5 +10,8 @@ export async function GET(request: Request) {
 
   const deviceId = new URL(request.url).searchParams.get("deviceId");
   const { session, viewport } = await readBoard();
-  return json(toPublic(session, viewport, deviceId && isId(deviceId) ? deviceId : null));
+  return json({
+    ...toPublic(session, viewport, deviceId && isId(deviceId) ? deviceId : null),
+    build: process.env.VERCEL_DEPLOYMENT_ID || process.env.VERCEL_GIT_COMMIT_SHA || "dev",
+  });
 }

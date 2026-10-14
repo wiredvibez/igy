@@ -135,6 +135,7 @@ function sameBoard(current: PublicSession, next: PublicSession): boolean {
     return false;
   }
   if (current.ownPhotoIds.join() !== next.ownPhotoIds.join()) return false;
+  if (current.build !== next.build) return false;
   return true;
 }
 

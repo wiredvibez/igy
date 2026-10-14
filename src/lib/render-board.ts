@@ -68,11 +68,7 @@ async function drawBoard(
     if (layout.center.kind === "hero" && session.hero) {
       const bitmap = bitmaps.get(session.hero.id);
       if (!bitmap) throw new Error("התמונה המרכזית חסרה.");
-      if (layout.center.fit === "contain") {
-        drawImageInRect(context, bitmap, scaleRect(containRect(layout.center, photoAspect(session.hero)), scale), 0);
-      } else {
-        drawCover(context, bitmap, scaleRect(layout.center, scale), 0);
-      }
+      drawImageInRect(context, bitmap, scaleRect(containRect(layout.center, photoAspect(session.hero)), scale), 0);
     } else if (joinUrl) {
       drawQr(context, joinUrl, scaleRect(layout.center, scale));
     }

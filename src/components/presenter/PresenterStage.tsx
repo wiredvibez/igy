@@ -51,9 +51,37 @@ export function PresenterStage() {
     };
   }, [size]);
 
-  const hero = session?.hero ?? null;
+  // A new deployment: reload so a presenter left open for hours runs the current code.
+  const build = session?.build ?? null;
+  const firstBuild = useRef<string | null>(null);
+  useEffect(() => {
+    if (!build) return;
+    if (firstBuild.current === null) firstBuild.current = build;
+    else if (build !== firstBuild.current) window.location.reload();
+  }, [build]);
+
+  // New photos (and a new center image) are fetched and decoded before the board makes
+  // room for them, so they appear straight into their cell instead of into white space.
+  const imageIds = useMemo(
+    () => [...(session?.hero ? [session.hero.id] : []), ...(session?.photos.map((photo) => photo.id) ?? [])],
+    [session],
+  );
+  const loaded = useLoadedImages(session ? imageIds : null);
+  const currentHero = session?.hero ?? null;
+  const [lastHero, setLastHero] = useState(currentHero);
+  const heroReady = currentHero !== null && loaded.has(currentHero.id);
+  if (heroReady && lastHero?.id !== currentHero.id) setLastHero(currentHero);
+  // A removed center image must not come back while a later one loads.
+  if (!currentHero && lastHero) setLastHero(null);
+  // While a replacement center image loads, the previous one stays up.
+  const hero = currentHero ? (heroReady ? currentHero : lastHero) : null;
+  const shownPhotos = useMemo(
+    () => session?.photos.filter((photo) => loaded.has(photo.id)) ?? [],
+    [session, loaded],
+  );
+
   const openStillThere =
-    openId !== null && (hero?.id === openId || (session?.photos.some((photo) => photo.id === openId) ?? false));
+    openId !== null && (hero?.id === openId || shownPhotos.some((photo) => photo.id === openId));
   const activeOpenId = openStillThere ? openId : null;
 
   useEffect(() => {
@@ -75,10 +103,10 @@ export function PresenterStage() {
     return layoutBoard({
       stageWidth: size.width,
       stageHeight: size.height,
-      photos: session.photos,
-      hero: session.hero,
+      photos: shownPhotos,
+      hero,
     });
-  }, [session, size.height, size.width]);
+  }, [session, shownPhotos, hero, size.height, size.width]);
 
   const joinUrl = origin ? `${origin}/join` : "";
 
@@ -129,15 +157,13 @@ export function PresenterStage() {
           rect={
             liftedId === hero.id && activeOpenId === hero.id
               ? expandedRect(size.width, size.height, photoAspect(hero))
-              : layout.center.fit === "contain"
-                ? containRect(layout.center, photoAspect(hero))
-                : layout.center
+              : containRect(layout.center, photoAspect(hero))
           }
           src={`/api/media/${hero.id}`}
           alt="תמונה מרכזית"
           pressed={activeOpenId === hero.id}
           lifted={liftedId === hero.id}
-          fit={liftedId === hero.id ? "contain" : layout.center.fit}
+          fit="contain"
           onToggle={(event) => {
             event.stopPropagation();
             toggle(hero.id);
@@ -147,17 +173,49 @@ export function PresenterStage() {
           }}
         />
       )}
-      {layout && !session?.hero && joinUrl && <QrCard rect={layout.center} url={joinUrl} />}
+      {layout?.center.kind === "qr" && joinUrl && <QrCard rect={layout.center} url={joinUrl} />}
       {(activeOpenId || liftedId) && (
         <button type="button" className="scrim" aria-label="סגירת התמונה" onClick={close} />
       )}
       {unavailable && <p className="local-note">האחסון של הלוח לא מוגדר (Redis / Blob).</p>}
-      {localHost && !unavailable && !session?.hero && (
+      {localHost && !unavailable && !hero && (
         <p className="local-note">פתחו את הדף מכתובת הרשת של המחשב כדי שטלפונים יוכלו לסרוק את הקוד.</p>
       )}
     </div>
   );
 }
+
+/**
+ * Ids whose images are downloaded and decoded. Everything on the board when the page
+ * opens counts as ready at once (the first paint shouldn't wait); later arrivals are
+ * fetched in the background and join when ready, or when they fail or take over eight
+ * seconds, so a broken or slow image can't hold the board back.
+ */
+function useLoadedImages(ids: string[] | null): Set<string> {
+  const [loaded, setLoaded] = useState<Set<string> | null>(null);
+  const requested = useRef(new Set<string>());
+  const key = ids?.join(",") ?? null;
+  if (loaded === null && ids !== null) setLoaded(new Set(ids));
+
+  useEffect(() => {
+    if (key === null || loaded === null) return;
+    for (const id of key ? key.split(",") : []) {
+      if (loaded.has(id) || requested.current.has(id)) continue;
+      requested.current.add(id);
+      const image = new Image();
+      image.src = `/api/media/${id}`;
+      // A hidden or busy window can stall decoding; after a few seconds it joins anyway.
+      const timeout = new Promise((resolve) => window.setTimeout(resolve, 8000));
+      void Promise.race([image.decode().catch(() => undefined), timeout]).then(() =>
+        setLoaded((previous) => (previous?.has(id) ? previous : new Set(previous).add(id))),
+      );
+    }
+  }, [key, loaded]);
+
+  return loaded ?? EMPTY;
+}
+
+const EMPTY = new Set<string>();
 
 function FrameButton({
   rect,

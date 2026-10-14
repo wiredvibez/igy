@@ -142,7 +142,7 @@ export function JoinScreen() {
     if (uploaded > 0) setSent(uploaded);
   }
 
-  const title = "תעלו למסך! 📸";
+  const title = "יאללה פה בוחרים תמונה";
   const sendLabel = progress
     ? `שולחים ${Math.min(progress.done + 1, progress.total)}/${progress.total}…`
     : pending.length > 1
@@ -166,11 +166,7 @@ export function JoinScreen() {
       </header>
 
       <h1 className="sticker">{title}</h1>
-      <p className="lede">
-        {single
-          ? "בחרו תמונה אחת ושלחו. תמונה חדשה תחליף את הקודמת שלכם."
-          : "בחרו תמונות, שלחו – והן קופצות ישר לקולאז׳ הגדול."}
-      </p>
+      {single && <p className="lede">בחרו תמונה אחת ושלחו. תמונה חדשה תחליף את הקודמת שלכם.</p>}
 
       <section className="pick-area">
         {pending.length === 0 ? (

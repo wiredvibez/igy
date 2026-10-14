@@ -4,17 +4,21 @@ import type { Rect } from "../src/lib/types";
 
 const stages = [
   [1920, 1080],
+  [1920, 1050],
+  [1440, 900],
+  [1280, 720],
   [1080, 1920],
   [1280, 800],
   [1024, 768],
   [2560, 1440],
 ];
-const counts = [0, 1, 2, 3, 5, 12, 40, 80, 99, 100];
+const counts = [0, 1, 2, 3, 4, 5, 6, 8, 12, 40, 80, 99, 100];
 const heroes = [
   null,
   { id: "hero", width: 4000, height: 3000 },
   { id: "hero", width: 1080, height: 1920 },
   { id: "hero", width: 3000, height: 1000 },
+  { id: "hero", width: 1600, height: 900 },
 ];
 
 let failures = 0;
@@ -40,9 +44,21 @@ for (const [stageWidth, stageHeight] of stages) {
         const dy = layout.center.top + layout.center.height / 2 - stageHeight / 2;
         if (Math.abs(dx) > 1 || Math.abs(dy) > 1) fail(label, "center image not centered");
       }
+      if (hero && count >= 4) {
+        // Never cropped, and from four photos up never letterboxed either: the cell has
+        // the image's own shape, give or take rounding. (It is always drawn whole.)
+        const aspect = hero.width / hero.height;
+        if (Math.abs(layout.center.width - aspect * layout.center.height) > 1.5) fail(label, "center cell off its shape");
+      }
       for (const rect of [layout.center, ...layout.tiles.map((tile) => tile.rect)]) {
         if (rect.width <= 0 || rect.height <= 0) fail(label, "empty cell");
       }
+      // No slivers: every photo stays visible.
+      const thinnest = Math.min(...layout.tiles.map((tile) => Math.min(tile.rect.width, tile.rect.height)));
+      if (count > 0 && count <= 40 && thinnest < 0.04 * Math.min(stageWidth, stageHeight)) {
+        fail(label, `a photo is only ${thinnest}px across`);
+      }
+      if (layout.tiles.some((tile) => !photos.some((photo) => photo.id === tile.id))) fail(label, "unknown tile");
       for (const tile of layout.tiles) {
         if (!inside(tile.rect, stageWidth, stageHeight)) fail(label, "tile outside");
         if (overlaps(tile.rect, layout.center)) fail(label, "tile hits center");
@@ -86,10 +102,19 @@ const typical = centered.tiles.map((tile) => tile.rect.width * tile.rect.height)
 const ratio = (centered.center.width * centered.center.height) / typical;
 if (ratio < 2.5 || ratio > 6.5) fail("hero", `is ${ratio.toFixed(1)}x a photo`);
 // Portraits stay portrait and landscapes stay landscape.
-for (const [index, tile] of centered.tiles.entries()) {
-  const portrait = mixed[index].height > mixed[index].width;
-  if (portrait !== tile.rect.height > tile.rect.width) fail("orientation", `photo ${index} turned sideways`);
+for (const tile of centered.tiles) {
+  const photo = mixed.find((item) => item.id === tile.id)!;
+  if (photo.height > photo.width !== tile.rect.height > tile.rect.width) fail("orientation", `${tile.id} turned sideways`);
 }
+
+// A new photo lands somewhere in the middle of the order, not always last.
+const before = layoutBoard({ stageWidth: 1920, stageHeight: 1080, photos: mixed.slice(0, 29), hero: null });
+const after = layoutBoard({ stageWidth: 1920, stageHeight: 1080, photos: mixed, hero: null });
+const moved = before.tiles.filter((tile) => {
+  const next = after.tiles.find((item) => item.id === tile.id)!;
+  return next.rect.left !== tile.rect.left || next.rect.top !== tile.rect.top;
+}).length;
+if (moved === 0 || moved === 29) fail("scatter", `${moved} of 29 photos moved`);
 
 // A wider photo gets a wider cell beside the QR.
 const wideFirst = layoutBoard({
