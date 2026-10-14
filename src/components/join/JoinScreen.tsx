@@ -166,7 +166,6 @@ export function JoinScreen() {
       </header>
 
       <h1 className="sticker">{title}</h1>
-      {single && <p className="lede">בחרו תמונה אחת ושלחו. תמונה חדשה תחליף את הקודמת שלכם.</p>}
 
       <section className="pick-area">
         {pending.length === 0 ? (
