@@ -1,7 +1,6 @@
 import { addPhoto } from "@/lib/board";
 import { boardErrorResponse, json, live, parseEpoch, parseId, readBody, storageGuard } from "@/lib/http";
 import { toPublic } from "@/lib/public-session";
-import { readViewport } from "@/lib/session-store";
 
 export async function POST(request: Request) {
   await live();
@@ -19,8 +18,7 @@ export async function POST(request: Request) {
 
   try {
     const session = await addPhoto({ id, deviceId, epoch, bytes });
-    const viewport = await readViewport();
-    return json({ session: toPublic(session, viewport, deviceId) });
+    return json({ session: toPublic(session, deviceId) });
   } catch (error) {
     const response = boardErrorResponse(error);
     if (response) return response;

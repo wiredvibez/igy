@@ -2,7 +2,6 @@ import { setMode } from "@/lib/board";
 import { isAdminRequest } from "@/lib/auth";
 import { boardErrorResponse, json, live, storageGuard } from "@/lib/http";
 import { toPublic } from "@/lib/public-session";
-import { readViewport } from "@/lib/session-store";
 import type { UploadMode } from "@/lib/types";
 
 export async function POST(request: Request) {
@@ -20,7 +19,7 @@ export async function POST(request: Request) {
 
   try {
     const session = await setMode(epoch, mode);
-    return json({ session: toPublic(session, await readViewport(), null) });
+    return json({ session: toPublic(session, null) });
   } catch (error) {
     const response = boardErrorResponse(error);
     if (response) return response;

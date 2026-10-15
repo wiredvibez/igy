@@ -19,12 +19,6 @@ export type SessionState = {
   photos: Asset[];
 };
 
-export type ViewportState = {
-  width: number;
-  height: number;
-  updatedAt: number;
-};
-
 export type PublicPhoto = {
   id: string;
   width: number;
@@ -38,7 +32,6 @@ export type PublicSession = {
   mode: UploadMode;
   hero: PublicPhoto | null;
   photos: PublicPhoto[];
-  viewport: ViewportState | null;
   ownPhotoIds: string[];
   // The running deployment, so an open presenter can reload when a new one ships.
   build?: string;

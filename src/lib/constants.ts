@@ -3,8 +3,6 @@ export const MAX_BYTES = 10 * 1024 * 1024;
 export const MAX_EDGE = 2560;
 export const MAX_DIMENSION = 4096;
 export const MAX_BATCH = 20;
-export const VIEWPORT_STALE_MS = 30_000;
-export const EXPORT_FALLBACK = { width: 1920, height: 1080 };
 export const BOARD_BG = "#ffffff";
 
 export const ID_PATTERN =

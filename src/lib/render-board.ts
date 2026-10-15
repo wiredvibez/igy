@@ -1,20 +1,24 @@
 import { BOARD_BG } from "@/lib/constants";
-import { containRect, coverSource, exportStage, layoutBoard, photoAspect } from "@/lib/layout";
+import { containRect, coverSource, layoutBoard, photoAspect } from "@/lib/layout";
 import { QR_QUIET, qrDrawSize, qrGrid } from "@/lib/qr";
 import type { PublicSession, Rect } from "@/lib/types";
 
+// The download is a square, laid out at this size and scaled up to the output size.
+const EXPORT_SIDE = 1600;
+
+/**
+ * A square image of the board: the center image at half the width, in the middle, with
+ * the photos fitted around it by the same layout as the presenter.
+ */
 export async function renderBoardPng(session: PublicSession, joinUrl: string): Promise<Blob> {
-  const stage = exportStage(session.viewport);
-  const long = Math.max(stage.width, stage.height);
-  const cap = /iPad|iPhone|iPod/.test(navigator.userAgent) ? 2048 : 3840;
-  const target = Math.min(cap, Math.max(long, Math.min(long * 2, cap)));
-  return drawBoard(session, joinUrl, stage.width, stage.height, target / long, 0);
+  const output = /iPad|iPhone|iPod/.test(navigator.userAgent) ? 2048 : 3200;
+  return drawBoard(session, joinUrl, EXPORT_SIDE, EXPORT_SIDE, output / EXPORT_SIDE, 0);
 }
 
 export async function renderBoardZip(session: PublicSession, joinUrl: string): Promise<Blob> {
   const [{ default: JSZip }, png] = await Promise.all([import("jszip"), renderBoardPng(session, joinUrl)]);
   const zip = new JSZip();
-  zip.file("presenter.png", png, { compression: "STORE" });
+  zip.file("collage.png", png, { compression: "STORE" });
   if (session.hero) {
     const file = await fetchAsset(session.hero.id, "center");
     zip.file(file.name, file.bytes, { compression: "STORE" });
@@ -39,6 +43,7 @@ async function drawBoard(
     stageHeight,
     photos: session.photos,
     hero: session.hero,
+    heroWidth: Math.round(stageWidth / 2),
   });
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(stageWidth * scale));

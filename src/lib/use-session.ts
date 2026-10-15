@@ -127,13 +127,6 @@ function sameBoard(current: PublicSession, next: PublicSession): boolean {
   for (let index = 0; index < current.photos.length; index += 1) {
     if (current.photos[index].id !== next.photos[index].id) return false;
   }
-  if (
-    current.viewport?.width !== next.viewport?.width ||
-    current.viewport?.height !== next.viewport?.height ||
-    current.viewport?.updatedAt !== next.viewport?.updatedAt
-  ) {
-    return false;
-  }
   if (current.ownPhotoIds.join() !== next.ownPhotoIds.join()) return false;
   if (current.build !== next.build) return false;
   return true;

@@ -1,5 +1,5 @@
 import { inspectImage } from "../src/lib/image-bytes";
-import { expandedRect, layoutBoard } from "../src/lib/layout";
+import { containRect, expandedRect, layoutBoard } from "../src/lib/layout";
 import type { Rect } from "../src/lib/types";
 
 const stages = [
@@ -83,7 +83,7 @@ const three = layoutBoard({
   hero: null,
 });
 if (three.center.width !== 640 || three.center.left !== 640) fail("three", "not thirds with the QR in the middle");
-// With enough photos the center image sits dead center at about four times a photo.
+// With enough photos the center image sits dead center, a large share of the screen.
 const mixed = Array.from({ length: 30 }, (_, index) => ({
   id: `m-${index}`,
   width: index % 3 === 0 ? 900 : 1600,
@@ -98,9 +98,62 @@ const centered = layoutBoard({
 const middleX = centered.center.left + centered.center.width / 2;
 const middleY = centered.center.top + centered.center.height / 2;
 if (Math.abs(middleX - 960) > 1 || Math.abs(middleY - 540) > 1) fail("hero", "not centered");
-const typical = centered.tiles.map((tile) => tile.rect.width * tile.rect.height).sort((a, b) => a - b)[15];
-const ratio = (centered.center.width * centered.center.height) / typical;
-if (ratio < 2.5 || ratio > 6.5) fail("hero", `is ${ratio.toFixed(1)}x a photo`);
+const share = (centered.center.width * centered.center.height) / (1920 * 1080);
+if (share < 0.15 || share > 0.35) fail("hero", `covers ${(share * 100).toFixed(0)}% of the screen`);
+
+// With one to three photos of any shapes the export still pins the center image to 800px.
+const shapeSet = [
+  [1600, 1200],
+  [1600, 900],
+  [1200, 1200],
+  [900, 1600],
+  [1500, 1000],
+];
+for (const heroShape of [[1600, 1200], [1600, 900], [1200, 1200], [1500, 1000]]) {
+  for (const a of shapeSet) {
+    for (const b of shapeSet) {
+      for (const count of [1, 2, 3]) {
+        const photos = [a, b, a].slice(0, count).map(([width, height], index) => ({ id: `t-${index}`, width, height }));
+        const square = layoutBoard({
+          stageWidth: 1600,
+          stageHeight: 1600,
+          photos,
+          hero: { id: "hero", width: heroShape[0], height: heroShape[1] },
+          heroWidth: 800,
+        });
+        const drawn = containRect(square.center, heroShape[0] / heroShape[1]);
+        if (Math.abs(drawn.width - 800) > 2) {
+          fail(`export hero ${heroShape.join("x")} photos ${a.join("x")},${b.join("x")} n=${count}`, `drawn ${drawn.width}px wide`);
+        }
+      }
+    }
+  }
+}
+
+// The square export pins the center image to half the width: drawn whole at 800px, in
+// the middle (beside the photo when there is only one), with no slivers around it.
+for (const heroShape of [{ width: 1600, height: 1000 }, { width: 900, height: 1600 }]) {
+  for (const count of [0, 1, 2, 3, 5, 8, 12, 30, 100]) {
+    const square = layoutBoard({
+      stageWidth: 1600,
+      stageHeight: 1600,
+      photos: mixed.concat(mixed, mixed, mixed).slice(0, count).map((photo, index) => ({ ...photo, id: `s-${index}` })),
+      hero: { id: "hero", ...heroShape },
+      heroWidth: 800,
+    });
+    const label = `export ${heroShape.width}x${heroShape.height} n=${count}`;
+    const drawn = containRect(square.center, heroShape.width / heroShape.height);
+    if (Math.abs(drawn.width - 800) > 2) fail(label, `center image drawn ${drawn.width}px wide`);
+    if (count !== 1 && Math.abs(drawn.left + drawn.width / 2 - 800) > 1) fail(label, "center image not centered");
+    const area = [square.center, ...square.tiles.map((tile) => tile.rect)].reduce(
+      (sum, rect) => sum + rect.width * rect.height,
+      0,
+    );
+    if (count > 0 && area !== 1600 * 1600) fail(label, "does not cover the square");
+    const thinnest = Math.min(...square.tiles.map((tile) => Math.min(tile.rect.width, tile.rect.height)));
+    if (count > 0 && count <= 30 && thinnest < 64) fail(label, `a photo is only ${thinnest}px across`);
+  }
+}
 // Portraits stay portrait and landscapes stay landscape.
 for (const tile of centered.tiles) {
   const photo = mixed.find((item) => item.id === tile.id)!;

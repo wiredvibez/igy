@@ -32,25 +32,6 @@ export function PresenterStage() {
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => {
-    if (size.width < 320 || size.height < 320) return;
-    const send = () => {
-      if (document.visibilityState !== "visible") return;
-      void fetch("/api/viewport", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(size),
-      });
-    };
-    send();
-    const timer = window.setInterval(send, 10_000);
-    document.addEventListener("visibilitychange", send);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", send);
-    };
-  }, [size]);
-
   // A new deployment: reload so a presenter left open for hours runs the current code.
   const build = session?.build ?? null;
   const firstBuild = useRef<string | null>(null);

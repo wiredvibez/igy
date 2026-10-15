@@ -4,7 +4,7 @@ A presenter screen shows a QR code. Phones scan it and upload photos, and the bo
 
 Each photo has a fixed pseudo-random place in the order (from its id), so a new photo lands somewhere random rather than always at the end, and the photos around it shift to make room. The presenter downloads and decodes a new photo before making room for it, and reloads itself when a new version is deployed.
 
-An admin can set a center image, which replaces the QR and is never cropped: it is always drawn whole, and its cell has its own shape. From two photos up it sits dead center, framed by the photos; it grows toward about four times the average photo as photos arrive (about 2× at six, 3× at a dozen, 4× from about thirty). With only a few photos, keeping it whole, centered and large means those few photos are cropped hard, and on two or three photos it may get thin white bands; with one photo it sits beside it. They can also switch between one photo per phone and many, download the board, or reset it. The phone page is Hebrew, RTL, and styled after igy.org.il.
+An admin can set a center image, which replaces the QR and is never cropped: it is always drawn whole, and its cell has its own shape. From two photos up it sits dead center, framed by the photos, and it dominates the board: about half the screen on a small board, easing to about a fifth from about thirty photos up. With only a few photos, keeping it whole, centered and large means those few photos are cropped hard, and a tall center image, or one with only two or three photos, may get white bands around it; with one photo it sits beside it. They can also switch between one photo per phone and many, reset the board, or download it: the image download is a square with the center image at half the width in the middle and the photos laid around it (beside it with a single photo; a center image taller than about 1:2 is shown smaller so it fits). The "all files" zip adds every original. The phone page is Hebrew, RTL, and styled after igy.org.il.
 
 ```bash
 npm install
@@ -15,7 +15,7 @@ Open the presenter at `/` and the phone page at `/join`. The admin password is `
 
 ## Storage
 
-- Board state (photo list, mode, center image, presenter size) lives in Redis: `KV_REST_API_URL` and `KV_REST_API_TOKEN` (Upstash for Redis on the Vercel Marketplace). Uploads update it with an atomic compare-and-set, so many phones can upload at once.
+- Board state (photo list, mode, center image) lives in Redis: `KV_REST_API_URL` and `KV_REST_API_TOKEN` (Upstash for Redis on the Vercel Marketplace). Uploads update it with an atomic compare-and-set, so many phones can upload at once.
 - Image bytes live in Vercel Blob: `BLOB_READ_WRITE_TOKEN`.
 - Remote storage is used only when both are set; otherwise (local dev) everything lives in `.data/`. On Vercel the API answers 503 until both are configured, and the screens say the board is unavailable.
 

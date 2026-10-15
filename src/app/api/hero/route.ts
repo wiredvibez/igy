@@ -2,7 +2,6 @@ import { clearHero, setHero } from "@/lib/board";
 import { isAdminRequest } from "@/lib/auth";
 import { boardErrorResponse, json, live, parseEpoch, parseId, readBody, storageGuard } from "@/lib/http";
 import { toPublic } from "@/lib/public-session";
-import { readViewport } from "@/lib/session-store";
 
 export async function POST(request: Request) {
   await live();
@@ -19,7 +18,7 @@ export async function POST(request: Request) {
 
   try {
     const session = await setHero({ id, epoch, bytes });
-    return json({ session: toPublic(session, await readViewport(), null) });
+    return json({ session: toPublic(session, null) });
   } catch (error) {
     const response = boardErrorResponse(error);
     if (response) return response;
@@ -37,7 +36,7 @@ export async function DELETE(request: Request) {
 
   try {
     const session = await clearHero(epoch);
-    return json({ session: toPublic(session, await readViewport(), null) });
+    return json({ session: toPublic(session, null) });
   } catch (error) {
     const response = boardErrorResponse(error);
     if (response) return response;

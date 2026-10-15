@@ -1,5 +1,4 @@
-import { EXPORT_FALLBACK, VIEWPORT_STALE_MS } from "@/lib/constants";
-import type { PublicPhoto, Rect, ViewportState } from "@/lib/types";
+import type { PublicPhoto, Rect } from "@/lib/types";
 
 export type PlacedTile = {
   id: string;
@@ -48,13 +47,15 @@ const ORIENTATION_WEIGHT = 6;
  * The QR is one item in the flow, placed near the middle: alone it fills the screen,
  * then splits it with the first photo, then sits between two, and so on. A center
  * image is never cropped: it is a block of its own exact shape, centered on the stage
- * at about four times the average photo, with the photos fitted around it.
+ * taking about a fifth to half of the screen, with the photos fitted around it.
  */
 export function layoutBoard(input: {
   stageWidth: number;
   stageHeight: number;
   photos: PhotoBox[];
   hero: PhotoBox | null;
+  // Pins the center image to this width (the square export uses half the width).
+  heroWidth?: number;
 }): StageLayout {
   const stageWidth = Math.max(1, Math.round(input.stageWidth));
   const stageHeight = Math.max(1, Math.round(input.stageHeight));
@@ -62,6 +63,14 @@ export function layoutBoard(input: {
   const full: Rect = { left: 0, top: 0, width: stageWidth, height: stageHeight };
 
   if (input.photos.length === 0) {
+    if (input.hero && input.heroWidth) {
+      const pinned = containRect(
+        { left: 0, top: 0, width: Math.min(stageWidth, input.heroWidth), height: stageHeight },
+        photoAspect(input.hero),
+      );
+      const center = { ...pinned, left: Math.round((stageWidth - pinned.width) / 2) };
+      return { stageWidth, stageHeight, center: { ...center, kind }, tiles: [] };
+    }
     return { stageWidth, stageHeight, center: { ...full, kind }, tiles: [] };
   }
 
@@ -75,10 +84,10 @@ export function layoutBoard(input: {
     const heroAspect = photoAspect(input.hero);
     best =
       (aspects.length >= 2
-        ? (heroLayout(stageWidth, stageHeight, aspects, heroAspect) ??
+        ? (heroLayout(stageWidth, stageHeight, aspects, heroAspect, false, input.heroWidth) ??
           // Nothing within the size limits: keep it centered anyway.
-          heroLayout(stageWidth, stageHeight, aspects, heroAspect, true))
-        : null) ?? besideLayout(stageWidth, stageHeight, aspects, heroAspect);
+          heroLayout(stageWidth, stageHeight, aspects, heroAspect, true, input.heroWidth))
+        : null) ?? besideLayout(stageWidth, stageHeight, aspects, heroAspect, input.heroWidth);
   } else {
     best = flowLayout(stageWidth, stageHeight, aspects, 1);
   }
@@ -133,18 +142,6 @@ export function containRect(rect: Rect, aspect: number): Rect {
     width,
     height,
   });
-}
-
-export function exportStage(viewport: ViewportState | null, now = Date.now()) {
-  if (
-    !viewport ||
-    now - viewport.updatedAt > VIEWPORT_STALE_MS ||
-    viewport.width < 320 ||
-    viewport.height < 320
-  ) {
-    return { ...EXPORT_FALLBACK, live: false as const };
-  }
-  return { width: viewport.width, height: viewport.height, live: true as const };
 }
 
 export function coverSource(
@@ -208,6 +205,14 @@ function flowLayout(stageWidth: number, stageHeight: number, aspects: number[], 
 }
 
 const HERO_WEIGHT = 4;
+
+/**
+ * The share of the screen the center image aims for: half on a small board, easing to
+ * just over a fifth from about thirty photos up, so it always dominates the collage.
+ */
+function heroShare(count: number): number {
+  return Math.min(0.5, Math.max(0.22, 9 / (count + 9)));
+}
 const HERO_SIZE_WEIGHT = 0.5;
 const MIN_SIDE = 24;
 
@@ -234,10 +239,12 @@ function heroLayout(
   aspects: number[],
   heroAspect: number,
   relaxed = false,
+  fixedWidth?: number,
 ): Candidate | null {
   const count = aspects.length;
-  // Four times the average photo: hero = 4 × (stage − hero) / count.
-  const targetArea = (HERO_WEIGHT * stageWidth * stageHeight) / (count + HERO_WEIGHT);
+  const targetArea = fixedWidth
+    ? (fixedWidth * fixedWidth) / heroAspect
+    : heroShare(count) * stageWidth * stageHeight;
   const sizeWeight = HERO_SIZE_WEIGHT;
   // It may shrink somewhat on a small board, but stays well above the photos and never
   // balloons past the target.
@@ -248,9 +255,12 @@ function heroLayout(
 
   const consider = (center: Rect, slots: Slot[]) => {
     const size = Math.log((center.width * center.height) / targetArea);
-    // Far from four times a photo: not worth laying out.
+    // Far from the target size: not worth laying out.
     if (!relaxed && (size < sizeRange[0] || size > sizeRange[1])) return;
-    const floor = sizeWeight * size * size;
+    // A cell taller or wider than the image leaves white bands beside it.
+    const shown = containRect(center, heroAspect);
+    const white = 1 - (shown.width * shown.height) / (center.width * center.height);
+    const floor = sizeWeight * size * size + 4 * white;
     // The photos can only add cost, so a center this far off can't win.
     if (best && floor >= best.score) return;
     const result = arrange(aspects, slots, relaxed);
@@ -271,47 +281,75 @@ function heroLayout(
   };
 
   // Heights for the center image: about two rows of a justified board, and around the
-  // height that gives exactly 4× at its own shape. Its width always follows its shape.
+  // height that hits the target area at its own shape. Its width always follows its shape.
   const ideal = Math.sqrt(targetArea / heroAspect);
   const heights = new Set<number>();
-  // Small boards get a couple of extra (shorter) row heights to choose from.
-  const maxRows = rowCounts(stageWidth, stageHeight, count + HERO_WEIGHT).length + (count < 10 ? 2 : 0);
-  for (let rows = 2; rows <= maxRows; rows += 0.5) heights.add(Math.round((2 * stageHeight) / rows));
-  for (const factor of [0.8, 0.9, 1, 1.1, 1.25]) heights.add(Math.round(ideal * factor));
+  if (fixedWidth) {
+    heights.add(Math.round(fixedWidth / heroAspect));
+  } else {
+    // Small boards get a couple of extra (shorter) row heights to choose from.
+    const maxRows = rowCounts(stageWidth, stageHeight, count + HERO_WEIGHT).length + (count < 10 ? 2 : 0);
+    for (let rows = 2; rows <= maxRows; rows += 0.5) heights.add(Math.round((2 * stageHeight) / rows));
+    for (const factor of [0.8, 0.9, 1, 1.1, 1.25]) heights.add(Math.round(ideal * factor));
+  }
   // Most promising first, so the early cut-off in `consider` skips more of the rest.
   const ordered = [...heights]
     .filter((height) => height >= 2 && height <= stageHeight)
     .sort((a, b) => Math.abs(Math.log(a / ideal)) - Math.abs(Math.log(b / ideal)));
 
+  const meanAspect = aspects.reduce((sum, aspect) => sum + aspect, 0) / count;
+
   for (const height of ordered) {
     const bandTop = Math.round((stageHeight - height) / 2);
     const bandBottom = stageHeight - bandTop;
     const bandHeight = bandBottom - bandTop;
-    const rowHeight = bandHeight / 2;
     const heroWidth = Math.round(heroAspect * bandHeight);
     const left = Math.floor((stageWidth - heroWidth) / 2);
     const right = stageWidth - heroWidth - left;
-    // Side columns narrower than half a row only hold slivers.
-    if (left < (relaxed ? MIN_SIDE : Math.max(MIN_SIDE, rowHeight * 0.5))) continue;
+    // Side columns narrower than a quarter of the center's height only hold slivers.
+    if (left < (relaxed ? MIN_SIDE : Math.max(MIN_SIDE, bandHeight / 4))) continue;
     const center = { left, top: bandTop, width: heroWidth, height: bandHeight };
 
-    for (const edgeRows of edgeOptions(bandTop, rowHeight)) {
-      // A frame: full-width rows above and below, two rows beside the center image.
-      consider(center, [
-        ...stackRows(0, 0, stageWidth, bandTop, edgeRows, 0),
-        ...stackRows(0, bandTop, left, bandHeight, 2, 1),
-        ...stackRows(stageWidth - right, bandTop, right, bandHeight, 2, 2),
-        ...stackRows(0, bandBottom, stageWidth, stageHeight - bandBottom, edgeRows, 3),
-      ]);
-      // Columns: full-height columns either side, rows above and below the center only.
-      const fullRows = Math.max(1, Math.round(stageHeight / rowHeight));
-      for (let sideRows = 1; sideRows <= fullRows + 1; sideRows += 1) {
-        consider(center, [
+    // Pinned width with only a thin strip left above and below (a tall image in the
+    // export): give the center image the full-height column instead, with small white
+    // bands, rather than fill those strips with slivers.
+    if (fixedWidth && bandTop > 0 && bandTop < 2 * floorTile) {
+      const column = { left, top: 0, width: heroWidth, height: stageHeight };
+      const fullRows = Math.max(1, Math.round(stageHeight / Math.max(1, bandHeight / 2)));
+      for (let sideRows = 1; sideRows <= Math.min(12, fullRows + 4); sideRows += 1) {
+        consider(column, [
           ...stackRows(0, 0, left, stageHeight, sideRows, 1),
-          ...stackRows(left, 0, heroWidth, bandTop, edgeRows, 0),
-          ...stackRows(left, bandBottom, heroWidth, stageHeight - bandBottom, edgeRows, 3),
           ...stackRows(stageWidth - right, 0, right, stageHeight, sideRows, 2),
         ]);
+      }
+    }
+
+    // Photo rows half the center's height (so it is two rows tall), or the height the
+    // photos would naturally take on the space left over, which suits a big center.
+    const natural = Math.sqrt((stageWidth * stageHeight - heroWidth * bandHeight) / count / meanAspect);
+    const rowHeights = [...new Set([bandHeight / 2, natural].map((value) => Math.round(value)))].filter(
+      (value) => value >= 1,
+    );
+    for (const rowHeight of rowHeights) {
+      const besideRows = Math.max(2, Math.round(bandHeight / rowHeight));
+      for (const edgeRows of edgeOptions(bandTop, rowHeight)) {
+        // A frame: full-width rows above and below, rows beside the center image.
+        consider(center, [
+          ...stackRows(0, 0, stageWidth, bandTop, edgeRows, 0),
+          ...stackRows(0, bandTop, left, bandHeight, besideRows, 1),
+          ...stackRows(stageWidth - right, bandTop, right, bandHeight, besideRows, 2),
+          ...stackRows(0, bandBottom, stageWidth, stageHeight - bandBottom, edgeRows, 3),
+        ]);
+        // Columns: full-height columns either side, rows above and below the center only.
+        const fullRows = Math.max(1, Math.round(stageHeight / rowHeight));
+        for (let sideRows = Math.max(1, fullRows - 2); sideRows <= fullRows + 1; sideRows += 1) {
+          consider(center, [
+            ...stackRows(0, 0, left, stageHeight, sideRows, 1),
+            ...stackRows(left, 0, heroWidth, bandTop, edgeRows, 0),
+            ...stackRows(left, bandBottom, heroWidth, stageHeight - bandBottom, edgeRows, 3),
+            ...stackRows(stageWidth - right, 0, right, stageHeight, sideRows, 2),
+          ]);
+        }
       }
     }
   }
@@ -320,7 +358,7 @@ function heroLayout(
   const fullHeight = Math.round(stageWidth / heroAspect);
   const bandTop = Math.floor((stageHeight - fullHeight) / 2);
   const bandBottom = bandTop + fullHeight;
-  if (bandTop >= (relaxed ? 1 : MIN_SIDE)) {
+  if (!fixedWidth && bandTop >= (relaxed ? 1 : MIN_SIDE)) {
     for (const edgeRows of edgeOptions(bandTop, fullHeight / 2)) {
       consider({ left: 0, top: bandTop, width: stageWidth, height: fullHeight }, [
         ...stackRows(0, 0, stageWidth, bandTop, edgeRows, 0),
@@ -333,7 +371,7 @@ function heroLayout(
   // it can't be both centered and uncropped with photos all round, so it takes the
   // middle column, shown whole with white bands, and the photos fill the side columns.
   if ((relaxed && !best) || (best && bestIsThin && count <= 3)) {
-    for (const share of [0.5, 0.6, 0.7]) {
+    for (const share of fixedWidth ? [fixedWidth / stageWidth] : [0.5, 0.6, 0.7]) {
       const left = Math.floor((stageWidth * (1 - share)) / 2);
       const right = stageWidth - Math.round(stageWidth * share) - left;
       if (left < MIN_SIDE || right < MIN_SIDE) continue;
@@ -365,18 +403,31 @@ function heroLayout(
  * surround it. It keeps its exact shape where it can; if its shape is too close to the
  * stage's to leave room, it gets most of the stage and is letterboxed in white.
  */
-function besideLayout(stageWidth: number, stageHeight: number, aspects: number[], heroAspect: number): Candidate {
+function besideLayout(
+  stageWidth: number,
+  stageHeight: number,
+  aspects: number[],
+  heroAspect: number,
+  fixedWidth?: number,
+): Candidate {
   const floorTile = minTile(stageWidth, stageHeight, aspects.length);
   const options: { center: Rect; region: Rect }[] = [];
+  if (fixedWidth && fixedWidth < stageWidth) {
+    // Pinned width (the export): the center image's column, the photos beside it.
+    options.push({
+      center: { left: 0, top: 0, width: fixedWidth, height: stageHeight },
+      region: { left: fixedWidth, top: 0, width: stageWidth - fixedWidth, height: stageHeight },
+    });
+  }
   const heroWidth = Math.round(heroAspect * stageHeight);
-  if (heroWidth <= stageWidth - floorTile) {
+  if (!fixedWidth && heroWidth <= stageWidth - floorTile) {
     options.push({
       center: { left: 0, top: 0, width: heroWidth, height: stageHeight },
       region: { left: heroWidth, top: 0, width: stageWidth - heroWidth, height: stageHeight },
     });
   }
   const heroHeight = Math.round(stageWidth / heroAspect);
-  if (heroHeight <= stageHeight - floorTile) {
+  if (!fixedWidth && heroHeight <= stageHeight - floorTile) {
     options.push({
       center: { left: 0, top: 0, width: stageWidth, height: heroHeight },
       region: { left: 0, top: heroHeight, width: stageWidth, height: stageHeight - heroHeight },
@@ -384,7 +435,7 @@ function besideLayout(stageWidth: number, stageHeight: number, aspects: number[]
   }
   // Too close to the stage's shape to leave a usable strip: most of the stage, letterboxed.
   const width = Math.round(stageWidth * 0.7);
-  options.push({
+  if (!fixedWidth) options.push({
     center: { left: 0, top: 0, width, height: stageHeight },
     region: { left: width, top: 0, width: stageWidth - width, height: stageHeight },
   });

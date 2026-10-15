@@ -5,7 +5,6 @@
 
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { MAX_PHOTOS } from "@/lib/constants";
-import { exportStage } from "@/lib/layout";
 import { prepareImage } from "@/lib/prepare-image";
 import { errorMessage, readPayload } from "@/lib/use-session";
 import type { PublicSession, UploadMode } from "@/lib/types";
@@ -26,7 +25,6 @@ export function AdminSheet({
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [download, setDownload] = useState<{ url: string; name: string } | null>(null);
-  const stage = exportStage(session.viewport);
 
   useEffect(() => {
     return () => {
@@ -221,9 +219,9 @@ export function AdminSheet({
       <div className="sheet-block">
         <h3>הורדה</h3>
         <p className="hint">
-          {stage.live
-            ? `בגודל של מסך ההצגה: \u2066${stage.width}×${stage.height}\u2069.`
-            : "מסך ההצגה לא מחובר. ההורדה תהיה בגודל \u20661920×1080\u2069."}
+          {session.hero
+            ? "תמונה מרובעת של הקולאז׳, עם התמונה המרכזית בחצי מהרוחב."
+            : "תמונה מרובעת של הקולאז׳."}
         </p>
         <div className="row">
           <button type="button" className="button solid" disabled={busy !== null} onClick={() => downloadFile("png")}>

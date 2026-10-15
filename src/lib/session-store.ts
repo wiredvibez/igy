@@ -3,15 +3,13 @@ import path from "node:path";
 import { BlobNotFoundError, del, get, put } from "@vercel/blob";
 import { Redis } from "@upstash/redis";
 import { isId } from "@/lib/constants";
-import type { ImageKind, SessionState, ViewportState } from "@/lib/types";
+import type { ImageKind, SessionState } from "@/lib/types";
 
 // Board state lives in Redis, which is strongly consistent, so concurrent uploads can
 // safely compare-and-set one key. Vercel Blob only holds the write-once image bytes:
 // its reads are eventually consistent, which made a Blob-hosted session file fail
 // its ETag check after a handful of uploads.
 const SESSION_KEY = "collage:session";
-const VIEWPORT_KEY = "collage:viewport";
-const VIEWPORT_TTL_SECONDS = 300;
 
 const COMPARE_AND_SET = `
 local current = redis.call('GET', KEYS[1])
@@ -43,38 +41,10 @@ export async function readSession(): Promise<SessionState> {
   return readLocalSession();
 }
 
-export async function readBoard(): Promise<{ session: SessionState; viewport: ViewportState | null }> {
-  if (usesRedis()) {
-    const [session, viewport] = await redis().mget<[string | null, string | null]>(SESSION_KEY, VIEWPORT_KEY);
-    return { session: parseSession(session), viewport: parseViewport(viewport) };
-  }
-  const [session, viewport] = await Promise.all([readLocalSession(), readViewport()]);
-  return { session, viewport };
-}
-
 export async function updateSession(
   mutator: (current: SessionState) => SessionState,
 ): Promise<SessionState> {
   return usesRedis() ? updateRedis(mutator) : updateLocal(mutator);
-}
-
-export async function readViewport(): Promise<ViewportState | null> {
-  if (usesRedis()) return parseViewport(await redis().get<string>(VIEWPORT_KEY));
-  try {
-    return parseViewport(await readFile(viewportFile(), "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-export async function writeViewport(viewport: ViewportState): Promise<void> {
-  const body = JSON.stringify(viewport);
-  if (usesRedis()) {
-    await redis().set(VIEWPORT_KEY, body, { ex: VIEWPORT_TTL_SECONDS });
-    return;
-  }
-  await mkdir(dataRoot(), { recursive: true });
-  await writeFile(viewportFile(), body);
 }
 
 export async function saveImage(id: string, bytes: Buffer, contentType: ImageKind): Promise<void> {
@@ -190,15 +160,6 @@ function parseSession(raw: string | null): SessionState {
   }
 }
 
-function parseViewport(raw: string | null): ViewportState | null {
-  if (!raw) return null;
-  try {
-    return normalizeViewport(JSON.parse(raw) as ViewportState);
-  } catch {
-    return null;
-  }
-}
-
 async function readLocalSession(): Promise<SessionState> {
   try {
     return parseSession(await readFile(sessionFile(), "utf8"));
@@ -251,25 +212,12 @@ function normalizeSession(value: SessionState): SessionState {
   };
 }
 
-function normalizeViewport(value: ViewportState): ViewportState | null {
-  if (!value || !Number.isFinite(value.width) || !Number.isFinite(value.height)) return null;
-  return {
-    width: value.width,
-    height: value.height,
-    updatedAt: Number.isFinite(value.updatedAt) ? value.updatedAt : 0,
-  };
-}
-
 function dataRoot(): string {
   return path.join(process.cwd(), ".data");
 }
 
 function sessionFile(): string {
   return path.join(dataRoot(), "session.json");
-}
-
-function viewportFile(): string {
-  return path.join(dataRoot(), "viewport.json");
 }
 
 function imageDir(): string {
