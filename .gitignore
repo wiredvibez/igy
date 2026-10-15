@@ -47,3 +47,6 @@ next-env.d.ts
 /.agents/
 /.claude/skills/
 /skills-lock.json
+
+# Office lock files
+~$*
